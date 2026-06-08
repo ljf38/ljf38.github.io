@@ -337,7 +337,7 @@
     <div class="output-section" id="outputSection" style="display:none">
       <div class="output-label">Copied data</div>
       <div class="output-box" id="outputBox"></div>
-      <p class="copy-tip">💡 <strong>To paste into Excel:</strong> Click the cell in the Date column of your monthly sheet, then press Ctrl+V (or Cmd+V on Mac). Each field will land in its own column.</p>
+      <p class="copy-tip">💡 <strong>To paste into Excel:</strong> Click the <strong>Date cell</strong> of the first empty row in your monthly sheet, then press Ctrl+V (Cmd+V on Mac). Each line item lands in its own row, with Date, Req Number, Supplier, Budget Code and Notes repeated on every row automatically.</p>
     </div>
   </div>
 
@@ -402,7 +402,7 @@ async function doExtract() {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1000,
         messages: [{
           role: 'user',
@@ -492,35 +492,53 @@ function updateTotal() {
 }
 
 // ── Copy ─────────────────────────────────────────────
-function getValues() {
-  const date = document.getElementById('f_date').value.trim();
-  const reqno = document.getElementById('f_reqno').value.trim();
+// Returns one row per line item. Shared fields (date, req, supplier, budget, notes)
+// repeat on every row so each line pastes cleanly into its own Excel row.
+function buildRows() {
+  const date     = document.getElementById('f_date').value.trim();
+  const reqno    = document.getElementById('f_reqno').value.trim();
   const supplier = document.getElementById('f_supplier').value.trim();
-  const budget = document.getElementById('f_budget').value.trim();
-  const notes = document.getElementById('f_notes').value.trim();
-  let total = 0;
-  const descs = [];
-  document.querySelectorAll('[id^="cost_"]').forEach(el => { total += parseFloat(el.value) || 0; });
-  document.querySelectorAll('[id^="desc_"]').forEach(el => { if (el.value.trim()) descs.push(el.value.trim()); });
-  const desc = descs.join('; ');
-  return { date, reqno, supplier, desc, total: total.toFixed(2), budget, notes };
+  const budget   = document.getElementById('f_budget').value.trim();
+  const notes    = document.getElementById('f_notes').value.trim();
+
+  const rows = [];
+  // Collect desc/cost pairs by matching indices
+  const descEls = document.querySelectorAll('[id^="desc_"]');
+  const costEls = document.querySelectorAll('[id^="cost_"]');
+  descEls.forEach((descEl, i) => {
+    const desc = descEl.value.trim();
+    const cost = parseFloat(costEls[i]?.value) || 0;
+    if (desc || cost) {
+      rows.push({ date, reqno, supplier, desc, cost: cost.toFixed(2), budget, notes });
+    }
+  });
+  if (rows.length === 0) {
+    rows.push({ date, reqno, supplier, desc: '', cost: '0.00', budget, notes });
+  }
+  return rows;
 }
 
 function copyTabSeparated() {
-  const v = getValues();
-  const row = [v.date, v.reqno, v.supplier, v.desc, '£' + v.total, v.budget, v.notes].join('\t');
-  navigator.clipboard.writeText(row).then(() => {
-    showOutput(row, 'tab');
-  }).catch(() => { fallbackCopy(row); showOutput(row, 'tab'); });
+  const rows = buildRows();
+  const lines = rows.map(r =>
+    [r.date, r.reqno, r.supplier, r.desc, '£' + r.cost, r.budget, r.notes].join('\t')
+  );
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text)
+    .then(() => showOutput(text, 'tab'))
+    .catch(() => { fallbackCopy(text); showOutput(text, 'tab'); });
 }
 
 function copyCSV() {
-  const v = getValues();
-  const fields = [v.date, v.reqno, v.supplier, v.desc, '£' + v.total, v.budget, v.notes];
-  const row = fields.map(f => '"' + f.replace(/"/g, '""') + '"').join(',');
-  navigator.clipboard.writeText(row).then(() => {
-    showOutput(row, 'csv');
-  }).catch(() => { fallbackCopy(row); showOutput(row, 'csv'); });
+  const rows = buildRows();
+  const lines = rows.map(r => {
+    const fields = [r.date, r.reqno, r.supplier, r.desc, '£' + r.cost, r.budget, r.notes];
+    return fields.map(f => '"' + String(f).replace(/"/g, '""') + '"').join(',');
+  });
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text)
+    .then(() => showOutput(text, 'csv'))
+    .catch(() => { fallbackCopy(text); showOutput(text, 'csv'); });
 }
 
 function fallbackCopy(text) {
@@ -532,7 +550,7 @@ function fallbackCopy(text) {
 }
 
 function showOutput(text, type) {
-  const header = 'Date\tReq Number\tSupplier\tItem Description\tTotal Cost\tBudget Code\tNotes';
+  const header = 'Date\tReq Number\tSupplier\tItem Description\tCost (£)\tBudget Code\tNotes';
   document.getElementById('outputBox').textContent = (type === 'tab' ? header + '\n' : '') + text;
   document.getElementById('outputSection').style.display = 'block';
 }
